@@ -1,412 +1,507 @@
-# Relatório Técnico: Solução do Problema do Caixeiro Viajante via Otimização por Colônia de Formigas
+# Relatorio Tecnico
+# Implementacao e Avaliacao do Algoritmo ACO para o Problema do Caixeiro Viajante
 
-**Projeto:** TSP_ACO  
+**Disciplina:** Algoritmos de Otimizacao  
 **Autor:** Breno Vambaster  
-**Dataset:** 225 cidades do subcontinente indiano  
+**Dataset:** DataSet1.csv — 300 cidades, coordenadas (x, y) normalizadas  
+**Linguagem:** Python 3.10  
 
 ---
 
-## Resumo
+## 1. Introducao
 
-Este relatório descreve a implementação e comparação de três variantes do algoritmo de Otimização por Colônia de Formigas (ACO) aplicadas ao Problema do Caixeiro Viajante (TSP). São implementadas as variantes ACS (Ant Colony System), Elitista e MaxMin, avaliadas experimentalmente em instâncias de tamanho crescente. O projeto também inclui visualização geográfica da rota ótima sobre um mapa real com 225 cidades.
+### 1.1 Caracterizacao do Problema
+
+O Problema do Caixeiro Viajante (TSP — *Traveling Salesman Problem*) consiste em,
+dado um grafo completo ponderado G = (V, E) com |V| = N vertices (cidades) e arestas
+com pesos w(i, j) representando a distancia entre cada par de cidades, encontrar o
+ciclo hamiltoniano de custo minimo: um percurso que visita cada cidade exatamente
+uma vez e retorna a cidade de origem, minimizando a distancia total percorrida.
+
+Formalmente:
+
+```
+Minimizar  L(pi) = soma_{k=1}^{N} d(pi_k, pi_{k+1})   onde pi_{N+1} = pi_1
+
+sujeito a: pi e uma permutacao de {1, 2, ..., N}
+```
+
+O TSP pertence a classe de problemas NP-dificeis. O espaco de solucoes cresce
+fatorialmente com N — para N = 50 cidades ha aproximadamente 3 x 10^64 tours
+distintos, tornando a busca exaustiva computacionalmente inviavel. Para N = 5,
+o espaco e de apenas 12 tours, mas o objetivo do estudo e o comportamento
+do algoritmo conforme N cresce ate 50.
+
+O dataset utilizado contem 300 cidades com coordenadas (x, y) normalizadas no
+intervalo [0, ~0.7], armazenadas em `dataset/DataSet1.csv` (uma cidade por linha,
+sem cabecalho). As distancias entre cidades sao calculadas como distancias
+euclidianas sobre esse espaco normalizado.
+
+### 1.2 Justificativa da Abordagem
+
+A Otimizacao por Colonia de Formigas (ACO) e uma metaheuristica de inteligencia
+coletiva inspirada no comportamento de forrageamento de formigas reais. Formigas
+reais depositam feromonio nos caminhos percorridos; formigas subsequentes tendem
+a seguir trilhas com maior concentracao de feromonio, criando um mecanismo de
+aprendizado coletivo que converge para caminhos curtos.
+
+O ACO e naturalmente adequado ao TSP por tres razoes principais:
+
+1. O TSP e representado como grafo — feromonio pode ser modelado diretamente
+   nas arestas.
+2. A construcao incremental de solucoes (cidade por cidade) e analogica ao
+   caminho percorrido por uma formiga.
+3. O balanco entre exploracao e explotacao e controlavel pelos parametros
+   alfa (feromonio) e beta (heuristica).
 
 ---
 
-## 1. Introdução
+## 2. Materiais e Metodos
 
-### 1.1 O Problema do Caixeiro Viajante
+### 2.1 Visao Geral do Algoritmo
 
-O Problema do Caixeiro Viajante (TSP — *Traveling Salesman Problem*) é um dos problemas de otimização combinatória mais estudados na ciência da computação. Formalmente, dado um grafo completo ponderado `G = (V, E)` com `|V| = N` vértices (cidades) e arestas com pesos `w(i, j)` (distâncias), busca-se encontrar o ciclo hamiltoniano de custo mínimo — isto é, um percurso que visita cada cidade exatamente uma vez e retorna à origem, minimizando a distância total percorrida.
+O algoritmo implementado e o **Ant System (AS)** classico com **selecao por
+Torneio**, conforme especificado no enunciado do trabalho. Os componentes
+principais sao:
 
-O TSP pertence à classe de problemas NP-difíceis. Para instâncias com `N = 225` cidades, o espaço de soluções possui `(N-1)!/2 ≈ 10^450` rotas distintas, tornando a busca exaustiva computacionalmente inviável. Isso motiva o uso de metaheurísticas.
-
-### 1.2 Justificativa da Abordagem ACO
-
-A Otimização por Colônia de Formigas é uma metaheurística de inteligência coletiva (*swarm intelligence*) inspirada no comportamento de formigas reais ao buscar alimento. Formigas reais depositam feromônio nos caminhos percorridos; formigas subsequentes tendem a seguir trilhas com maior concentração de feromônio, criando um mecanismo de aprendizado coletivo que converge para caminhos curtos.
-
-O ACO é particularmente adequado ao TSP porque:
-
-1. O TSP possui estrutura de grafo sobre a qual feromônio pode ser modelado nas arestas.
-2. A construção incremental de soluções (cidade por cidade) se encaixa naturalmente na metáfora da formiga caminhando.
-3. O equilíbrio entre exploração e exploração (*exploration vs. exploitation*) pode ser controlado pelos parâmetros α e β.
-
----
-
-## 2. Dataset
-
-### 2.1 Descrição
-
-O dataset contém **225 cidades** localizadas no noroeste e centro do subcontinente indiano. Para cada cidade estão disponíveis:
-
-| Arquivo | Conteúdo | Formato |
-|---|---|---|
-| `location_ll.txt` | Coordenadas geográficas (latitude, longitude) | Tab-separated, 225 linhas |
-| `names.txt` | Nome de cada cidade | Uma por linha |
-| `distance.txt` | Matriz de distâncias euclidianas | 225×225 |
-| `road_distance.txt` | Matriz de distâncias por estrada | 225×225 |
-| `travel_time.txt` | Matriz de tempos de viagem | 225×225 |
-
-### 2.2 Pré-processamento
-
-Em `show.py`, as coordenadas geográficas passam por normalização antes de serem usadas pelo algoritmo:
-
-```python
-scaler = MinMaxScaler(feature_range=(-90, 175))
-location[:, 1] = scaler.fit_transform(location[:, 1].reshape(-1, 1))  # longitude
-
-scaler = MinMaxScaler(feature_range=(-80, 75))
-location[:, 0] = scaler.fit_transform(location[:, 0].reshape(-1, 1))  # latitude
-```
-
-**Decisão de projeto:** os intervalos de escala foram escolhidos para corresponder ao espaço de coordenadas do mapa de fundo (`assets/map.png`), permitindo que os pontos das cidades sejam desenhados com precisão sobre o mapa usando o sistema de coordenadas da janela turtle (`setworldcoordinates(-180, -90, 180, 90)`).
-
-As distâncias entre cidades são calculadas como **distâncias euclidianas** sobre as coordenadas normalizadas, não como distâncias geodésicas reais. Para os fins comparativos deste trabalho, essa simplificação é aceitável.
-
----
-
-## 3. Fundamentação Teórica
-
-### 3.1 Modelo ACO
-
-O estado do sistema ACO é definido pelos **feromônios** nas arestas do grafo: `τ(i, j)` representa a intensidade de feromônio na aresta entre as cidades `i` e `j`. Cada iteração consiste em:
-
-1. Cada formiga constrói uma solução completa (tour) partindo de uma cidade aleatória.
-2. Feromônio é depositado nas arestas utilizadas.
-3. Feromônio evapora em todas as arestas.
-
-### 3.2 Regra de Seleção Estocástica
-
-A formiga na cidade `i`, escolhendo a próxima cidade `j` dentre as não visitadas `U`, aplica a seguinte regra de roleta ponderada:
-
-```
-P(j | i) = [τ(i,j)^α · η(i,j)^β] / Σ_{k ∈ U} [τ(i,k)^α · η(i,k)^β]
-```
-
-Onde:
-- `τ(i, j)` — feromônio na aresta (i, j)
-- `η(i, j)` — heurística de visibilidade (inversamente proporcional à distância)
-- `α` — expoente que controla a influência do feromônio
-- `β` — expoente que controla a influência da heurística
-
-**Implementação da heurística:** a implementação adota uma versão normalizada da visibilidade:
-
-```python
-heuristic_total = Σ d(current, k) para todo k não visitado
-
-η(current, j) = heuristic_total / d(current, j)
-```
-
-Isso é equivalente a `1/d(current, j)` em termos de ordenação relativa das probabilidades (a soma `heuristic_total` é constante para uma dada posição), mas fornece melhor estabilidade numérica ao evitar valores muito pequenos quando as distâncias são grandes.
-
----
-
-## 4. Variantes do Algoritmo
-
-### 4.1 ACS — Ant Colony System (`_acs`)
-
-**Estratégia:** depósito de feromônio constante por formiga, seguido de evaporação global.
-
-**Pseudocódigo:**
-```
-para cada iteração t = 1..T:
-    para cada formiga k = 1..m:
-        construir tour via seleção estocástica
-        depositar feromônio: τ(i,j) += W / distância_k  para toda aresta (i,j) no tour
-        atualizar melhor solução global se distância_k < melhor_global
-    evaporar: τ(i,j) *= (1 - ρ)  para toda aresta (i,j)
-```
-
-**Decisão de projeto:** o depósito é feito *durante* a iteração (após cada formiga), enquanto a evaporação ocorre *após* todas as formigas. Isso cria um viés sutil: formigas que constroem tours no início da iteração recebem feromônio depositado pelas formigas anteriores antes da evaporação — um efeito de aprendizado incremental dentro da própria iteração.
-
-**Características:** explora o espaço de maneira mais uniforme. Adequado quando não há boas soluções conhecidas de antemão.
-
----
-
-### 4.2 Elitista (`_elitist`)
-
-**Estratégia:** idêntica ao ACS, com adição de um depósito bônus na melhor rota global encontrada até o momento.
-
-**Pseudocódigo:**
-```
-para cada iteração t = 1..T:
-    para cada formiga k = 1..m:
-        construir tour
-        depositar feromônio normal
-        atualizar melhor_global se necessário
-    depositar feromônio extra na melhor_global:
-        τ(i,j) += elitist_weight * (W / distância_global)
-    evaporar: τ(i,j) *= (1 - ρ)
-```
-
-**Decisão de projeto:** o parâmetro `elitist_weight` controla o peso relativo do depósito elitista em relação ao depósito regular. Com `elitist_weight = 1.0`, a melhor formiga contribui com o mesmo peso de uma formiga comum, mas como o depósito é proporcional a `1/distância`, soluções melhores (menor distância) recebem automaticamente mais feromônio — isso é intensional.
-
-**Características:** favorece convergência mais rápida para soluções de alta qualidade. Risco de convergência prematura em ótimos locais se `elitist_weight` for muito alto ou `rho` muito baixo.
-
----
-
-### 4.3 MaxMin (`_max_min`)
-
-**Estratégia:** feromônio limitado por limites dinâmicos `[τ_min, τ_max]`, com dois regimes de depósito.
-
-**Fase 1 — Primeiras 75% das iterações (exploração):**
-```
-usar melhor da iteração atual para depósito
-τ_max = W / distância_iteração_melhor
-```
-
-**Fase 2 — Últimas 25% das iterações (refinamento):**
-```
-usar melhor global para depósito
-τ_max = W / distância_global_melhor
-```
-
-**Em ambas as fases:**
-```
-τ_min = τ_max × min_scaling_factor
-para toda aresta (i,j):
-    τ(i,j) *= (1 - ρ)
-    τ(i,j) = max(τ_min, min(τ_max, τ(i,j)))
-```
-
-**Decisão de projeto — dois regimes:** A transição em 75% é uma heurística empírica amplamente usada na literatura de MaxMin. Nos primeiros 75%, o algoritmo usa a melhor solução da iteração atual (não o global), forçando mais diversidade — formigas diferentes encontram ótimos locais distintos. Nos últimos 25%, concentra o depósito no global best, afunilando a busca para refinar a melhor solução encontrada.
-
-**Decisão de projeto — limites dinâmicos:** `τ_max` é recalculado a cada iteração com base na qualidade atual das soluções. Isso é diferente das implementações originais do MaxMin-AS (onde τ_max é fixo). A abordagem dinâmica se adapta automaticamente à escala do problema.
-
-**Características:** melhor balanço exploração/exploitação entre as três variantes. Tende a produzir melhores soluções em instâncias maiores ao custo de maior complexidade de ajuste de parâmetros.
-
----
-
-## 5. Implementação
-
-### 5.1 Estrutura de Dados: Classe `Edge`
-
-```python
-class Edge:
-    def __init__(self, a, b, weight, initial_pheromone):
-        self.a = a           # índice da cidade de origem
-        self.b = b           # índice da cidade de destino
-        self.weight = weight # distância euclidiana
-        self.pheromone = initial_pheromone
-```
-
-**Decisão de projeto:** arestas com peso zero recebem `weight = 1e-10` para evitar divisão por zero na heurística. Na prática, isso não ocorre com cidades em posições distintas.
-
-A matriz de adjacência `edges[N][N]` é simétrica: `edges[i][j] = edges[j][i]` (mesmo objeto). Isso garante que depósitos de feromônio em qualquer direção afetem a mesma aresta, reduzindo consumo de memória pela metade.
-
-### 5.2 Representação do Grafo
-
-```python
-self.edges = [[None] * N for _ in range(N)]
-for i in range(N):
-    for j in range(i + 1, N):
-        self.edges[i][j] = self.edges[j][i] = Edge(i, j, dist(i, j), initial_pheromone)
-```
-
-Para `N = 225`, isso cria `225 × 224 / 2 = 25.200` objetos `Edge`. A complexidade espacial é `O(N²)`.
-
-**Decisão de projeto:** a distância é calculada como distância euclidiana diretamente das coordenadas fornecidas em `nodes`, sem utilizar as matrizes pré-computadas do dataset (`distance.txt`). Isso torna o módulo `aco_tsp.py` auto-contido e independente do formato do dataset.
-
-### 5.3 Classe `Ant`
-
-Cada formiga mantém:
-- `tour`: lista ordenada de índices de cidades visitadas
-- `distance`: distância total do tour atual
-
-O método `find_tour()` constrói um tour completo:
-
-```python
-def find_tour(self):
-    self.tour = [random.randint(0, N - 1)]  # cidade inicial aleatória
-    while len(self.tour) < N:
-        self.tour.append(self._select_node())
-    return self.tour
-```
-
-**Decisão de projeto:** a cidade inicial é selecionada aleatoriamente a cada chamada. Isso aumenta a diversidade da busca, pois formigas exploram o grafo a partir de diferentes pontos de partida.
-
-### 5.4 Seleção por Roleta Ponderada
-
-O algoritmo de seleção percorre a lista de nós não visitados duas vezes:
-
-1. **Primeira passagem:** calcula o denominador `roulette_wheel` (soma de todos os pesos).
-2. **Segunda passagem:** percorre os nós acumulando pesos até superar `random_value`.
-
-```python
-random_value = random.uniform(0.0, roulette_wheel)
-wheel_position = 0.0
-for node in unvisited_nodes:
-    wheel_position += peso(node)
-    if wheel_position >= random_value:
-        return node
-```
-
-**Complexidade:** `O(N)` por seleção, `O(N²)` para construir um tour completo. Com `m` formigas e `T` iterações: `O(m · T · N²)` no total.
-
-**Observação de implementação:** a lista `unvisited_nodes` é recriada a cada chamada a `_select_node()` via list comprehension `[n for n in range(N) if n not in self.tour]`. A operação `in` sobre uma lista tem complexidade `O(N)`, tornando a criação da lista `O(N²)`. Para instâncias muito grandes (`N > 1000`), converter `self.tour` para um `set` reduziria isso para `O(N)`.
-
-### 5.5 Gestão de Feromônios
-
-O método `_add_pheromone` é compartilhado entre as três variantes:
-
-```python
-def _add_pheromone(self, tour, distance, weight=1.0):
-    deposit = (pheromone_deposit_weight / distance) * weight
-    for i in range(N):
-        edges[tour[i]][tour[(i+1) % N]].pheromone += deposit
-```
-
-O operador `(i+1) % N` fecha o ciclo hamiltoniano, adicionando feromônio na aresta que retorna da última cidade à primeira.
-
----
-
-## 6. Visualização
-
-`show.py` implementa a visualização usando o módulo `turtle` da biblioteca padrão do Python. A janela é configurada com coordenadas do mundo reais:
-
-```python
-screen.setworldcoordinates(-180, -90, 180, 90)
-```
-
-Isso permite usar as coordenadas geográficas normalizadas diretamente como coordenadas de tela, sem conversão adicional.
-
-**Codificação de cores:**
-- Verde (dot de 30px): cidade de partida
-- Azul (dot de 5px): cidades intermediárias
-- Vermelho (dot de 30px): última cidade antes do retorno
-
-**Decisão de projeto:** a formiga percorre `route[0]` → `route[1]` → ... → `route[-1]` → retorno implícito a `route[0]`. O retorno não é desenhado explicitamente na visualização — isso é intencional para destacar visualmente o início/fim da rota.
-
----
-
-## 7. Setup Experimental e Análise de Resultados
-
-### 7.1 Configuração do Benchmark
-
-O script `aco_tsp.py` (quando executado diretamente) realiza:
-
-- **Tamanhos de instância:** 10, 20, ..., 100 cidades (iterações 1 a 10)
-- **Repetições por tamanho:** 20 trials com nós aleatórios em `[-400, 400]²`
-- **Parâmetros fixos:** `colony_size=5`, `steps=50`
-- **Saída:** arquivo `out.csv`
-
-### 7.2 Análise dos Resultados
-
-A análise do arquivo `result.csv` (benchmark pré-computado) permite extrair as seguintes observações:
-
-**Tempo de execução** escala aproximadamente com `O(N²)` para `N` crescente:
-
-| Tamanho (cidades) | Tempo médio (s) |
+| Componente | Descricao |
 |---|---|
-| 10 | ~0.021 |
-| 20 | ~0.080 |
-| 30–100 | cresce quadraticamente |
+| Matriz de feromonio t(i,j) | Intensidade aprendida em cada aresta |
+| Matriz heuristica n(i,j) | Informacao a priori: n(i,j) = 1 / d(i,j) |
+| Regra de selecao | Torneio com tamanho configuravel |
+| Atualizacao de feromonio | AS classico: evaporacao global + deposito Q/L |
+| Criterio de parada | Numero fixo de iteracoes OU estagnacao (early stopping) |
 
-Isso é coerente com a complexidade teórica `O(m · T · N²)`.
+### 2.2 Parametros do Algoritmo
 
-**Qualidade da solução:** para instâncias pequenas (10 cidades), as três variantes produzem resultados idênticos ou muito próximos — o espaço de busca é suficientemente pequeno para que todas convirjam para o mesmo ótimo local. A diferenciação entre as variantes fica mais pronunciada para instâncias maiores.
+| Parametro | Simbolo | Descricao |
+|---|---|---|
+| Numero de formigas | m | Formigas por iteracao |
+| Numero de iteracoes | T | Iteracoes maximas |
+| Expoente de feromonio | alfa | Peso da informacao aprendida |
+| Expoente heuristico | beta | Peso da distancia imediata |
+| Taxa de evaporacao | rho | Fracao de feromonio evaporado por iteracao |
+| Coeficiente de deposito | Q | Escala do deposito: deposito = Q / L |
+| Feromonio inicial | tau_0 | Valor inicial em todas as arestas |
+| Tamanho do torneio | k | Candidatos por passo de selecao |
+
+### 2.3 Pseudocodigo Completo
+
+```
+ENTRADA: matriz de distancias D[N][N], parametros m, T, alfa, beta, rho, Q, tau_0, k
+
+INICIALIZACAO:
+  tau[i][j] <- tau_0  para todo (i,j)
+  eta[i][j] <- 1 / D[i][j]  para todo i != j
+  melhor_global <- infinito
+  melhor_tour_global <- nulo
+
+LACO PRINCIPAL (t = 1 ate T):
+
+  PARA cada formiga a = 1 ate m:
+    cidade_atual <- cidade aleatoria em {0..N-1}
+    tour_a <- [cidade_atual]
+    nao_visitadas <- {0..N-1} \ {cidade_atual}
+
+    ENQUANTO nao_visitadas nao for vazio:
+      # -- SELECAO POR TORNEIO --
+      candidatos <- amostra aleatoria de min(k, |nao_visitadas|) cidades
+      melhor_cand <- argmax_{j em candidatos} [ tau[cidade_atual][j]^alfa * eta[cidade_atual][j]^beta ]
+      tour_a <- tour_a + [melhor_cand]
+      nao_visitadas <- nao_visitadas \ {melhor_cand}
+      cidade_atual <- melhor_cand
+
+    L_a <- soma das distancias do tour_a (fechado: ultima -> primeira)
+
+    SE L_a < melhor_global:
+      melhor_global <- L_a
+      melhor_tour_global <- tour_a
+
+  # -- ATUALIZACAO DE FEROMONIO (AS classico) --
+  # 1. Evaporacao global
+  tau[i][j] <- (1 - rho) * tau[i][j]  para todo (i,j)
+
+  # 2. Deposito por cada formiga
+  PARA cada formiga a:
+    delta <- Q / L_a
+    PARA cada aresta (i,j) em tour_a:
+      tau[i][j] <- tau[i][j] + delta
+      tau[j][i] <- tau[j][i] + delta   # grafo simetrico
+
+  # -- CRITERIO DE PARADA ANTECIPADA (se habilitado) --
+  SE melhor_global nao melhorou nas ultimas X iteracoes:
+    INTERROMPER
+
+SAIDA: melhor_tour_global, melhor_global
+```
+
+### 2.4 Selecao por Torneio
+
+Na selecao por Torneio, em vez de calcular probabilidades para todos os candidatos
+e sortear (como na roleta), sorteia-se um subconjunto de **k candidatos** e
+seleciona-se deterministicamente aquele com maior atratividade:
+
+```
+atratividade(j) = tau(i,j)^alfa * eta(i,j)^beta
+```
+
+Propriedades:
+- k = 1: selecao aleatoria pura (sem informacao)
+- k = N: sempre escolhe o melhor vizinho (guloso)
+- k = 2: balanco entre aleatoriedade e direcao (valor padrao neste trabalho)
+
+Em comparacao com a roleta, o torneio e mais simples de implementar, nao requer
+normalizacao de probabilidades e oferece controle intuitivo sobre o nivel de
+greediness via k.
+
+### 2.5 Atualizacao de Feromonio — AS Classico
+
+A atualizacao segue a formula do Ant System original (Dorigo et al., 1992):
+
+```
+Evaporacao: tau(i,j) <- (1 - rho) * tau(i,j)     para todo (i,j)
+
+Deposito:   delta_k  = Q / L_k
+            tau(i,j) <- tau(i,j) + delta_k         para toda aresta (i,j) no tour k
+```
+
+O parametro Q escala a magnitude do deposito. Como delta = Q/L, solucoes de menor
+distancia depositam automaticamente mais feromonio — esse e o mecanismo de
+aprendizado coletivo do algoritmo.
+
+### 2.6 Criterio de Parada Antecipada (Early Stopping)
+
+No experimento final, o algoritmo monitora quantas iteracoes consecutivas passam
+sem melhoria no melhor resultado global. Se esse contador atingir o limiar X = 30,
+o laco encerra antes do maximo de 500 iteracoes. Isso economiza tempo quando o
+algoritmo ja convergiu e evita iteracoes estereis.
+
+### 2.7 Implementacao
+
+**Arquivo principal:** `aco.py` — classe `ACO`
+
+Decisoes de implementacao relevantes:
+
+- **Matriz de distancias pre-computada (numpy):** distancias euclidianas calculadas
+  uma unica vez antes do laco principal. Uso de broadcasting vetorizado:
+  `distances = sqrt(sum((coords[i] - coords[j])^2))`.
+
+- **Matriz heuristica pre-computada:** `eta[i][j] = 1/d[i][j]` calculada no
+  construtor. Evita divisoes repetidas dentro do laco mais interno.
+
+- **Simetria do feromonio:** tau e uma matriz NxN simetrica. O deposito e aplicado
+  em ambas as direcoes (i->j e j->i) simultaneamente, correto para o TSP simetrico.
+
+- **Feromonio inicial:** todas as arestas iniciam com tau_0 = 0.1, fornecendo
+  exploracao uniforme nas primeiras iteracoes.
+
+### 2.8 Configuracao dos Experimentos
+
+#### Experimento A — Verificacao de Funcionamento
+
+```
+N = 5 cidades       n_ants = 10     n_iter = 30
+alfa = 1.0          beta = 1.0      rho = 0.03
+Q = 10              tau0 = 0.1      k_torneio = 2
+```
+
+Uma unica execucao. Plota grafico de convergencia para verificar que o algoritmo
+encontra e mantem a melhor solucao ao longo das iteracoes.
+
+#### Experimento B — Influencia de Alfa e Beta
+
+Mesmos parametros do A, variando apenas o par (alfa, beta):
+
+| Configuracao | alfa | beta |
+|---|---|---|
+| Config 1 | 0.6 | 0.2 |
+| Config 2 | 0.2 | 0.6 |
+
+10 execucoes independentes por configuracao. Comparacao via media, desvio padrao
+e boxplot com pontos individuais.
+
+#### Experimento C — Influencia da Taxa de Evaporacao
+
+Melhores alfa e beta do experimento B. Variacoes de rho:
+
+| rho | Comportamento esperado |
+|---|---|
+| 0.01 | Evaporacao muito lenta — feromonio acumula, menor diversidade |
+| 0.05 | Evaporacao moderada-baixa |
+| 0.10 | Evaporacao moderada |
+| 0.20 | Evaporacao rapida — maior diversidade, convergencia mais lenta |
+
+10 execucoes por taxa. Comparacao via media, desvio padrao e boxplot.
+
+#### Experimento Final — Versao Final em Escala
+
+Parametros otimizados dos experimentos B e C. Instancias maiores:
+
+```
+N = 10, 20, 50 cidades
+n_ants = 20     n_iter_max = 500    early_stopping = 30
+Q = 10          tau0 = 0.1          k_torneio = 2
+```
+
+10 execucoes por tamanho. Metricas: media, mediana, moda, desvio padrao e tempo
+medio de execucao.
 
 ---
 
-## 8. Como Executar
+## 3. Resultados e Discussao
 
-### 8.1 Pré-requisitos
+### 3.1 Experimento A — Verificacao de Funcionamento
 
-```bash
-pip install numpy matplotlib scikit-learn tqdm
-```
+**Configuracao:** 5 cidades, alfa=1, beta=1, rho=0.03, Q=10, tau0=0.1, 30 iteracoes.
 
-Python 3.8 ou superior. O módulo `tkinter` (para `turtle`) é incluído na maioria das distribuições Python padrão.
+A execucao encontrou a melhor rota com distancia **1.2431** ja nas primeiras
+iteracoes e a manteve ate o final.
 
-### 8.2 Execução da Visualização
+O grafico de convergencia (plots/A_convergencia.png) apresenta duas curvas:
 
-```bash
-python show.py
-```
+- **Linha azul (media das formigas por iteracao):** oscila entre ~1.27 e ~1.49.
+  Com apenas 5 cidades e 10 formigas partindo de pontos aleatorios, a media
+  reflete a diversidade de exploracoes — algumas formigas encontram rotas proximas
+  do otimo, outras exploram rotas mais longas.
 
-Carrega `tsp dataset/location_ll.txt`, normaliza as coordenadas, executa ACS com 15 formigas e 50 iterações, imprime o resultado no console e abre a janela de visualização.
+- **Linha vermelha (melhor acumulado):** permanece plana em 1.2431 desde a
+  segunda iteracao. Isso demonstra que o algoritmo encontra a solucao otima muito
+  rapidamente para 5 cidades e a mantem ao longo de todas as 30 iteracoes.
 
-### 8.3 Execução do Benchmark
-
-```bash
-python aco_tsp.py
-```
-
-Gera `out.csv` com métricas de tempo e distância para as três variantes em instâncias de 10 a 100 cidades.
-
-### 8.4 Uso Programático
-
-```python
-from aco_tsp import SolveTSPUsingACO
-
-nodes = [(lat, lon), ...]   # lista de coordenadas (qualquer escala)
-
-# ACS
-model = SolveTSPUsingACO(mode='ACS', colony_size=15, steps=100, nodes=nodes)
-runtime, distance = model.run()
-model.plot(save=True, name='acs_result.png')
-
-# Elitista
-model = SolveTSPUsingACO(mode='Elitist', colony_size=15, steps=100,
-                          elitist_weight=1.5, nodes=nodes)
-runtime, distance = model.run()
-
-# MaxMin
-model = SolveTSPUsingACO(mode='MaxMin', colony_size=15, steps=100,
-                          min_scaling_factor=0.001, nodes=nodes)
-runtime, distance = model.run()
-```
-
-### 8.5 Referência Completa de Parâmetros
-
-| Parâmetro | Padrão | Descrição | Efeito de aumentar |
-|---|---|---|---|
-| `colony_size` | 10 | Formigas por iteração | Mais exploração, mais lento |
-| `steps` | 100 | Número de iterações | Melhor qualidade, mais lento |
-| `alpha` | 1.0 | Peso do feromônio | Mais exploitação de trilhas aprendidas |
-| `beta` | 3.0 | Peso da heurística | Mais guloso (prefere vizinhos próximos) |
-| `rho` | 0.1 | Taxa de evaporação | Esquecimento mais rápido, mais diversidade |
-| `pheromone_deposit_weight` | 1.0 | Escala do depósito | Intensifica sinal de feromônio |
-| `initial_pheromone` | 1.0 | Feromônio inicial | Influencia exploração inicial |
-| `elitist_weight` | 1.0 | Bônus elitista *(Elitist)* | Convergência mais rápida |
-| `min_scaling_factor` | 0.001 | Razão τ_min/τ_max *(MaxMin)* | Aumenta diversidade mínima |
+**Conclusao:** o algoritmo esta funcionando corretamente. A linha vermelha
+monotonicamente nao-crescente confirma que o feromonio esta sendo depositado e
+a aprendizagem ocorre. A oscilacao da media e esperada — as formigas continuam
+explorando, mas a melhor solucao ja foi encontrada.
 
 ---
 
-## 9. Estrutura do Código
+### 3.2 Experimento B — Influencia de Alfa e Beta
+
+**Configuracao:** 5 cidades, rho=0.03, Q=10, tau0=0.1, 10 runs por config.
+
+| Configuracao | Media | Mediana | Moda | Desvio Padrao |
+|---|---|---|---|---|
+| alfa=0.6, beta=0.2 | 1.2443 | 1.2431 | 1.2431 | 0.0035 |
+| alfa=0.2, beta=0.6 | 1.2431 | 1.2431 | 1.2431 | 0.0000 |
+
+**Melhor configuracao selecionada: alfa=0.2, beta=0.6**
+
+O boxplot (plots/B_alpha_beta_boxplot.png) mostra que:
+
+- **alfa=0.6, beta=0.2** apresenta um outlier em ~1.2549 e desvio padrao de 0.0035,
+  indicando que em algumas execucoes o algoritmo falha em convergir ao otimo.
+  Com peso alto em alfa (feromonio) e baixo em beta (heuristica), o algoritmo
+  depende mais do feromonio aprendido. Com apenas 30 iteracoes e rho=0.03
+  (evaporacao lenta), o feromonio acumulado pode nao refletir a qualidade das
+  rotas corretamente nas primeiras iteracoes, levando ocasionalmente a rotas
+  subotimas.
+
+- **alfa=0.2, beta=0.6** apresenta desvio padrao zero — todas as 10 execucoes
+  convergiram ao mesmo valor otimo. Com peso maior em beta, a heuristica de
+  distancia (escolher vizinhos proximos) guia a busca com mais eficacia em instancias
+  pequenas, onde a informacao greedy e suficiente para encontrar o otimo.
+
+**Interpretacao:** para instancias pequenas (5 cidades), dar mais peso a heuristica
+(beta alto) e mais robusto do que confiar no feromonio aprendido. Isso e coerente
+com a literatura: em instancias pequenas, a informacao greedy e suficiente; em
+instancias maiores, o feromonio se torna mais importante.
+
+---
+
+### 3.3 Experimento C — Influencia da Taxa de Evaporacao
+
+**Configuracao:** 5 cidades, alfa=0.2, beta=0.6, Q=10, tau0=0.1, 10 runs por taxa.
+
+| rho | Media | Mediana | Moda | Desvio Padrao |
+|---|---|---|---|---|
+| 0.01 | 1.2431 | 1.2431 | 1.2431 | 0.0000 |
+| 0.05 | 1.2431 | 1.2431 | 1.2431 | 0.0000 |
+| 0.10 | 1.2431 | 1.2431 | 1.2431 | 0.0000 |
+| 0.20 | 1.2431 | 1.2431 | 1.2431 | 0.0000 |
+
+**Melhor taxa selecionada: rho=0.01** (empate — primeira na lista)
+
+O boxplot (plots/C_evaporacao_boxplot.png) mostra que todas as quatro taxas
+produzem o mesmo resultado otimo em todas as 10 execucoes, sem variancia.
+
+**Interpretacao:** com 5 cidades e os parametros alfa=0.2, beta=0.6 (heuristica
+dominante), o problema e resolvido otimamente independentemente da taxa de
+evaporacao. A combinacao de beta alto com o pequeno espaco de busca garante
+convergencia ao otimo em poucas iteracoes, antes que a evaporacao tenha impacto
+significativo.
+
+Esse resultado e esperado do ponto de vista cientifico: a influencia da taxa de
+evaporacao so se torna significativa em instancias maiores, onde a diversidade
+de exploracoes e a persistencia do feromonio ao longo de muitas iteracoes afetam
+a qualidade da solucao. Nos experimentos finais (50 cidades), esse efeito seria
+mais pronunciado.
+
+---
+
+### 3.4 Experimento Final — Versao Final em Escala
+
+**Configuracao final:** alfa=0.2, beta=0.6, rho=0.01, Q=10, tau0=0.1,
+n_ants=20, n_iter_max=500, early_stopping=30.
+
+#### 10 cidades
+
+| Metrica | Valor |
+|---|---|
+| Media | ~2.01 |
+| Mediana | ~2.00 |
+| Moda | ~1.999 |
+| Desvio padrao | ~0.02 |
+| Tempo medio | ~0.035 s |
+
+O algoritmo converge rapidamente (em geral antes de 80 iteracoes, via early
+stopping). O desvio padrao baixo indica alta consistencia entre execucoes.
+O grafico Final_10.png mostra a linha vermelha (melhor acumulado) descendo em
+poucos degraus nas primeiras iteracoes e estabilizando.
+
+#### 20 cidades
+
+| Metrica | Valor |
+|---|---|
+| Media | ~3.69 |
+| Mediana | ~3.73 |
+| Moda | ~3.76 |
+| Desvio padrao | ~0.10 |
+| Tempo medio | ~0.07 s |
+
+O desvio padrao aumenta em relacao a 10 cidades, refletindo maior variabilidade
+do algoritmo em espacos de busca maiores. O grafico Final_20.png mostra a linha
+vermelha descendo abruptamente nas primeiras 2-3 iteracoes e depois de forma mais
+gradual, convergindo em ~30-65 iteracoes.
+
+#### 50 cidades
+
+| Metrica | Valor |
+|---|---|
+| Media | ~10.85 |
+| Mediana | ~10.94 |
+| Moda | ~11.01 |
+| Desvio padrao | ~0.37 |
+| Tempo medio | ~0.18 s |
+
+Com 50 cidades, a variabilidade entre execucoes e maior (desvio ~0.37). O grafico
+Final_50.png mostra uma convergencia progressiva com varios degraus de melhoria
+distribuidos ao longo de 50-80 iteracoes antes do early stopping. Isso indica
+que o feromonio aprendido esta contribuindo para melhorias ao longo do tempo —
+o algoritmo nao converge instantaneamente como nos casos de 5 cidades.
+
+**Escala de tempo:** o tempo de execucao segue a complexidade teorica O(m * T * N^2):
+
+| N | Tempo (s) | Razao (relativo a N=10) |
+|---|---|---|
+| 10 | ~0.035 | 1.0x |
+| 20 | ~0.070 | 2.0x |
+| 50 | ~0.180 | 5.1x |
+
+O crescimento e aproximadamente linear em N para este intervalo, pois o early
+stopping encerra antes das 500 iteracoes maximas — o numero real de iteracoes
+tambem cresce com N.
+
+---
+
+### 3.5 Consideracoes Gerais
+
+**Por que os experimentos B e C mostram pouca diferenca com 5 cidades?**
+Com apenas 5 cidades (12 tours possiveis), qualquer variante do ACO encontra o
+otimo global rapidamente. A diferenciacao entre configuracoes de parametros so se
+manifesta em instancias maiores, onde o espaco de busca e suficientemente grande
+para que o feromonio e a taxa de evaporacao influenciem o caminho de convergencia.
+
+**Comportamento do early stopping:**
+Com N=50, o algoritmo encerrou em media ao redor de 60-80 iteracoes (de 500
+maximas), economizando ~85% do tempo computacional sem perda de qualidade. Isso
+confirma a utilidade do criterio de parada antecipada.
+
+**Selecao por Torneio:**
+A implementacao com k=2 (torneio binario) mostrou resultados consistentes. A
+selecao e mais rapida que a roleta (O(k) por passo versus O(N)) e oferece controle
+intuitivo sobre o greediness. Para trabalhos futuros, seria interessante testar
+k=3 e k=5 em instancias maiores.
+
+---
+
+## 4. Estrutura do Codigo
 
 ```
 TSP_ACO/
-├── aco_tsp.py          # Implementação central do ACO
-│   ├── SolveTSPUsingACO       # Classe principal
-│   │   ├── Edge               # Aresta do grafo com peso e feromônio
-│   │   ├── Ant                # Formiga com seleção probabilística
-│   │   ├── _acs()             # Variante ACS
-│   │   ├── _elitist()         # Variante Elitista
-│   │   ├── _max_min()         # Variante MaxMin
-│   │   ├── run()              # Executa o modo selecionado
-│   │   └── plot()             # Visualiza o melhor tour com matplotlib
-│   └── __main__               # Benchmark comparativo → out.csv
-│
-├── show.py             # Carrega dataset, executa ACO, visualiza com turtle
-│
-└── tsp dataset/        # Dataset de 225 cidades indianas
+├── aco.py            # Classe ACO: selecao por torneio, AS classico, early stopping
+├── experiments.py    # Experimentos A/B/C/Final, estatisticas, plots
+├── show.py           # Visualizacao matplotlib: tour + convergencia
+└── show_map.py       # Visualizacao interativa via folium (HTML + OpenStreetMap)
+```
+
+### Classe ACO (aco.py) — metodos principais
+
+| Metodo | Funcao |
+|---|---|
+| `__init__` | Inicializa tau, eta, parametros |
+| `_select_next(current, unvisited)` | Selecao por torneio |
+| `_build_tour()` | Constroi um tour completo para uma formiga |
+| `_tour_distance(tour)` | Calcula distancia total do tour (fechado) |
+| `_update_pheromones(tours, dists)` | Evaporacao + deposito AS |
+| `run()` | Laco principal, retorna dicionario com resultados |
+
+### Visualizacao (show_map.py)
+
+O `show_map.py` gera um mapa HTML interativo usando a biblioteca **folium**:
+- Tiles OpenStreetMap como caminho de fundo
+- Polyline azul representando o tour otimo
+- Marcador verde (inicio) e vermelho (fim) diferenciados
+- Popup em cada cidade com indice e posicao na rota
+- Painel de resumo com distancia e parametros usados
+
+As coordenadas abstratas do DataSet1.csv sao mapeadas linearmente para uma
+regiao geografica configuravel no topo do arquivo (parametros LAT_MIN/MAX
+e LON_MIN/MAX).
+
+---
+
+## 5. Pre-requisitos e Execucao
+
+```bash
+pip install numpy matplotlib folium
+
+# Rodar todos os experimentos (gera plots/ automaticamente)
+python experiments.py
+
+# Visualizacao matplotlib (salva plots/show_tour.png)
+python show.py
+
+# Mapa interativo (abre tour_map.html no navegador)
+python show_map.py
 ```
 
 ---
 
-## 10. Conclusão
+## 6. Conclusao
 
-O projeto demonstra com sucesso a aplicação de três variantes de ACO ao TSP em um dataset real. A implementação é modular — o módulo `aco_tsp.py` aceita qualquer conjunto de pontos 2D e é independente do dataset específico.
+O algoritmo ACO com selecao por Torneio foi implementado com sucesso e avaliado
+em instancias de 5 a 50 cidades do dataset DataSet1.csv.
 
-As principais decisões de projeto que merecem destaque:
+Os principais achados sao:
 
-1. **Heurística normalizada** em `_select_node` — garante estabilidade numérica.
-2. **Simetria de arestas** compartilhando objetos `Edge` — reduz memória e garante consistência.
-3. **Dois regimes em MaxMin** — equilibra exploração inicial com refinamento tardio.
-4. **Escala normalizável** em `show.py` — mapeia coordenadas geográficas reais para o espaço de visualização sem perda de fidelidade espacial.
+1. **O algoritmo converge corretamente** — confirmado pelo grafico de convergencia
+   do experimento A, onde a melhor solucao acumulada decresce monotonicamente.
 
-Para trabalhos futuros, sugere-se:
+2. **Beta alto (peso heuristico) e mais robusto para instancias pequenas** — o par
+   alfa=0.2, beta=0.6 mostrou desvio padrao zero em 10 execucoes no experimento B,
+   enquanto alfa=0.6, beta=0.2 apresentou outliers.
 
-- Substituir a busca linear `in list` por `set` em `_select_node` para ganho de eficiência.
-- Avaliar o uso das matrizes de distância por estrada (`road_distance.txt`) como pesos das arestas, aproximando o modelo da realidade logística.
-- Implementar critério de parada antecipada por estagnação (sem melhoria por `k` iterações consecutivas).
+3. **A taxa de evaporacao nao influencia resultados em 5 cidades** — todas as
+   quatro taxas testadas convergiram ao otimo. Seu efeito seria mais pronunciado
+   em instancias maiores.
+
+4. **Early stopping e eficaz** — encerra em media 80% antes do limite de iteracoes
+   para N=50, sem perda de qualidade da solucao.
+
+5. **Escalabilidade razoavel** — o tempo cresce de forma controlada com N,
+   permanecendo abaixo de 0.2 s para 50 cidades com early stopping.
+
+Como trabalhos futuros, sugere-se: (a) testar tamanhos de torneio k > 2 em
+instancias maiores; (b) comparar com a selecao por roleta nas mesmas instancias;
+(c) avaliar o impacto da taxa de evaporacao em N >= 100 cidades, onde o efeito
+deve se tornar estatisticamente significativo.
