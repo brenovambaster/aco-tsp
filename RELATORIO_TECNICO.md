@@ -431,7 +431,8 @@ TSP_ACO/
 ├── aco.py            # Classe ACO: selecao por torneio, AS classico, early stopping
 ├── experiments.py    # Experimentos A/B/C/Final, estatisticas, plots
 ├── show.py           # Visualizacao matplotlib: tour + convergencia
-└── show_map.py       # Visualizacao interativa via folium (HTML + OpenStreetMap)
+├── show_gif.py       # Animacao GIF passo a passo da rota encontrada
+└── show_map.py       # Visualizacao interativa via folium (AntPath + lista passo a passo)
 ```
 
 ### Classe ACO (aco.py) — metodos principais

@@ -2,8 +2,7 @@
 Visualizacao interativa do melhor tour ACO sobre um mapa real (OpenStreetMap).
 
 Gera um arquivo HTML que pode ser aberto em qualquer navegador.
-As coordenadas do DataSet1.csv sao abstratas (normalizadas), entao sao
-mapeadas linearmente para uma regiao geografica configuravel.
+Inclui animacao do caminho (AntPath) e lista passo a passo.
 
 Uso:
   python show_map.py
@@ -14,6 +13,7 @@ import os
 import webbrowser
 import numpy as np
 import folium
+from folium.plugins import AntPath
 from aco import ACO
 
 # ── Parametros configuráveis ───────────────────────────────────────────────
@@ -33,23 +33,21 @@ EARLY_STOP   = 30
 OUTPUT_HTML  = 'tour_map.html'
 
 # Regiao geografica para mapear as coordenadas abstratas do dataset.
-# Ajuste para qualquer regiao de interesse (lat/lon em graus decimais).
-LAT_MIN, LAT_MAX = -23.8, -23.2   # Sul -> Norte  (ex: regiao de Sao Paulo)
-LON_MIN, LON_MAX = -46.9, -46.2   # Oeste -> Leste
+LAT_MIN, LAT_MAX = -23.8, -23.2   
+LON_MIN, LON_MAX = -46.9, -46.2   
 
 # ── Carregamento do dataset ────────────────────────────────────────────────
 
 coords = np.loadtxt(DATASET_PATH, delimiter=',', max_rows=N_CITIES)
 
-# Mapeamento linear: coordenadas abstratas [min,max] -> [LAT/LON_MIN, LAT/LON_MAX]
 def scale(values, new_min, new_max):
     v_min, v_max = values.min(), values.max()
     if v_max == v_min:
         return np.full_like(values, (new_min + new_max) / 2.0)
     return new_min + (values - v_min) / (v_max - v_min) * (new_max - new_min)
 
-lats = scale(coords[:, 1], LAT_MIN, LAT_MAX)   # y -> latitude
-lons = scale(coords[:, 0], LON_MIN, LON_MAX)   # x -> longitude
+lats = scale(coords[:, 1], LAT_MIN, LAT_MAX)   
+lons = scale(coords[:, 0], LON_MIN, LON_MAX)   
 
 # ── Execucao do ACO ────────────────────────────────────────────────────────
 
@@ -57,11 +55,9 @@ diff      = coords[:, np.newaxis, :] - coords[np.newaxis, :, :]
 distances = np.sqrt((diff ** 2).sum(axis=2))
 
 print(f"Dataset  : {DATASET_PATH}  ({N_CITIES} cidades)")
-print(f"Params   : alpha={ALPHA}, beta={BETA}, rho={RHO}, Q={Q}, "
-      f"n_ants={N_ANTS}, n_iter={N_ITERATIONS}")
 print("Rodando ACO...")
 
-aco    = ACO(
+aco = ACO(
     distances=distances,
     n_ants=N_ANTS,
     n_iterations=N_ITERATIONS,
@@ -76,10 +72,6 @@ aco    = ACO(
 result = aco.run()
 tour   = result['best_tour']
 
-print(f"Tempo    : {result['runtime']:.3f} s")
-print(f"Distancia: {result['best_distance']:.4f}")
-print(f"Iteracoes: {result['n_iterations_run']}")
-
 # ── Mapa folium ────────────────────────────────────────────────────────────
 
 center_lat = (LAT_MIN + LAT_MAX) / 2
@@ -91,57 +83,63 @@ m = folium.Map(
     tiles='OpenStreetMap',
 )
 
-# Titulo flutuante no canto superior direito
-title_html = f"""
+# Painel lateral com a lista de cidades (passo a passo)
+steps_html = "<h4>Sequência de Visita</h4><ul style='list-style-type:none; padding-left:0;'>"
+for i, city_idx in enumerate(tour):
+    steps_html += f"<li><b>{i+1}º</b>: Cidade {city_idx}</li>"
+steps_html += f"<li><b>{len(tour)+1}º</b>: Retorno à Cidade {tour[0]}</li></ul>"
+
+info_panel_html = f"""
 <div style="position:fixed; top:10px; right:10px; z-index:1000;
-            background:white; padding:10px 14px; border-radius:6px;
-            box-shadow:2px 2px 6px rgba(0,0,0,0.3); font-family:Arial; font-size:13px;">
-  <b>ACO - TSP</b><br>
-  {N_CITIES} cidades &nbsp;|&nbsp; {N_ANTS} formigas<br>
-  Distancia: <b>{result['best_distance']:.4f}</b><br>
-  Iteracoes: {result['n_iterations_run']}
+            background:white; padding:15px; border-radius:8px;
+            box-shadow:0 0 15px rgba(0,0,0,0.2); font-family:Arial; font-size:13px;
+            max-height: 80vh; overflow-y: auto; width: 200px;">
+  <h3 style="margin-top:0">ACO - TSP</h3>
+  <b>Distância:</b> {result['best_distance']:.4f}<br>
+  <b>Cidades:</b> {N_CITIES}<br>
+  <hr>
+  {steps_html}
 </div>
 """
-m.get_root().html.add_child(folium.Element(title_html))
+m.get_root().html.add_child(folium.Element(info_panel_html))
 
-# Arestas do tour (linha azul fechada)
+# Arestas do tour com AntPath (animação de movimento)
 tour_coords = [[lats[c], lons[c]] for c in tour] + [[lats[tour[0]], lons[tour[0]]]]
-folium.PolyLine(
-    tour_coords,
+AntPath(
+    locations=tour_coords,
+    dash_array=[10, 20],
+    delay=1000,
     color='#2166ac',
-    weight=2.5,
+    pulse_color='#3f9',
+    weight=3,
     opacity=0.8,
-    tooltip='Tour otimo',
+    tooltip='Caminho Animado'
 ).add_to(m)
 
-# Marcadores das cidades intermediarias
+# Marcadores das cidades
 for rank, city_idx in enumerate(tour):
     lat, lon = lats[city_idx], lons[city_idx]
-
-    if city_idx == tour[0]:
-        # Cidade inicial — marcador verde maior
+    
+    popup_text = f"<b>Passo {rank + 1}</b><br>Cidade: {city_idx}<br>Lat: {lat:.4f}<br>Lon: {lon:.4f}"
+    
+    if rank == 0:
         folium.Marker(
             location=[lat, lon],
-            tooltip=f'Inicio (cidade {city_idx})',
+            popup=popup_text,
+            tooltip=f'INÍCIO (Passo 1)',
             icon=folium.Icon(color='green', icon='play', prefix='fa'),
         ).add_to(m)
-    elif city_idx == tour[-1]:
-        # Ultima cidade antes do retorno — marcador vermelho
-        folium.Marker(
-            location=[lat, lon],
-            tooltip=f'Ultima (cidade {city_idx})',
-            icon=folium.Icon(color='red', icon='flag', prefix='fa'),
-        ).add_to(m)
     else:
-        # Cidades intermediarias — circulo pequeno com popup
+        # Círculo com o número do passo
         folium.CircleMarker(
             location=[lat, lon],
-            radius=5,
+            radius=6,
             color='#d73027',
             fill=True,
             fill_color='#fc8d59',
-            fill_opacity=0.8,
-            tooltip=f'Cidade {city_idx}  (ordem: {rank + 1})',
+            fill_opacity=0.9,
+            popup=popup_text,
+            tooltip=f'Passo {rank + 1} (Cidade {city_idx})',
         ).add_to(m)
 
 # Salva e abre no navegador
