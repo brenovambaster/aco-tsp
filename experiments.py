@@ -305,7 +305,7 @@ def experiment_final(best_alpha, best_beta, best_rho):
 
     10 runs por tamanho. Estatisticas e grafico de convergencia da melhor run.
     """
-    EARLY_STOP_PATIENCE = 30    # x: iteracoes sem melhoria para encerrar
+    EARLY_STOP_PATIENCE = 50    # x: iteracoes sem melhoria para encerrar
 
     print("\n" + "=" * 60)
     print("EXPERIMENTO FINAL - Versao Final em Escala")
@@ -323,7 +323,7 @@ def experiment_final(best_alpha, best_beta, best_rho):
         _, distances = load_dataset(DATASET_PATH, n_cities=n)
 
         params = dict(
-            n_ants=20,
+            n_ants=50,
             n_iterations=500,
             alpha=best_alpha,
             beta=best_beta,

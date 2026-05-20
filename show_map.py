@@ -19,16 +19,16 @@ from aco import ACO
 # ── Parametros configuráveis ───────────────────────────────────────────────
 
 DATASET_PATH = 'dataset/DataSet1.csv'
-N_CITIES     = 50        # quantas cidades usar (max 300)
-N_ANTS       = 20
+N_CITIES     = 20        # quantas cidades usar (max 300)
+N_ANTS       = 50
 N_ITERATIONS = 300
 ALPHA        = 1.0
 BETA         = 3.0
 RHO          = 0.1
 Q            = 10.0
 TAU0         = 0.1
-TOURNAMENT   = 2
-EARLY_STOP   = 30
+TOURNAMENT   = 3
+EARLY_STOP   = 100
 
 OUTPUT_HTML  = 'tour_map.html'
 

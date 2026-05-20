@@ -16,15 +16,15 @@ from aco import ACO
 
 DATASET_PATH  = 'dataset/DataSet1.csv'
 N_CITIES      = 20       # Reduzido para o GIF ficar leve e claro
-N_ANTS        = 20
+N_ANTS        = 50
 N_ITERATIONS  = 200
 ALPHA         = 1.0
 BETA          = 3.0
 RHO           = 0.1
 Q             = 10.0
 TAU0          = 0.1
-TOURNAMENT    = 2
-EARLY_STOP    = 30
+TOURNAMENT    = 3
+EARLY_STOP    = 100
 
 OUTPUT_GIF    = 'assets/path_trace_new.gif'
 
