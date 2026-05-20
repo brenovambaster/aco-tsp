@@ -1,3 +1,7 @@
 .idea/*
 *.pyc
 *.ipynb_checkpoints/
+instructions.md
+.claude
+__pycache__/
+plan
